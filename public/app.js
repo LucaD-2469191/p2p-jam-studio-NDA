@@ -283,12 +283,44 @@ document.getElementById('joinBtn').onclick = () => {
 };
 
 function createPeerConnection(targetId, isInitiator) {
+  const pc = new RTCPeerConnection(rtcConfig);
+  peers.set(targetId, { pc, reliableDc: null, fastDc: null, rtt: '-'});
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      ws.send(JSON.stringify({
+        type: 'ice-candidate',
+        targetId,
+        candidate: event.candidate
+      }));
+    }
+  };
+
+  if (isInitiator) {
+    pc.createDataChannel('test-channel');
+  }
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[WebRTC] Status met ${targetId}: ${pc.connectionState}`);
+  };
+
+  return pc;
   // TODO: Maak RTCPeerConnection(rtcConfig) aan, voeg streamDestination.stream tracks toe,
   // handel inkomende audio af via pc.ontrack, stuur ICE candidates door via WebSocket
   // en zet DataChannels op voor state- en klok-synchronisatie.
 }
 
 function setupDataChannel(dc, peerId) {
+  dc.onopen = () => {
+    console.log(`[DataChannel] '${dc.label}' GEOPEND met ${peerId}!`);
+  };
+  dc.onclose = () => {
+    console.warn(`[DataChannel] '${dc.label}' GESLOTEN met ${peerId}.`);
+  };
+  dc.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    console.log(`[DataChannel <-] Bericht van ${peerId} op '${dc.label}':`, msg);
+  };
   // TODO: Luister naar dc.onmessage om inkomende acties van peers te verwerken
   // (STEP_TOGGLE, NOTE_CHANGE, CLEAR_TRACK, SET_TRACK, CLEAR_ALL, SWING, FILTER, TRANSPORT, BPM, CLOCK_PING, CLOCK_PONG).
 }
