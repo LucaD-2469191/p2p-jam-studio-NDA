@@ -267,9 +267,22 @@ document.getElementById('joinBtn').onclick = () => {
     }
     else if (msg.type === 'offer') {
       console.log(`[Signaling <-] Offer ontvangen van ${msg.senderId}. Answer aanmaken...`);
+      const pc = createPeerConnection(msg.senderId, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      console.log(`[Signaling ->] Answer versturen naar ${msg.senderId}`);
+      ws.send(JSON.stringify({ type: 'answer', targetId: msg.senderId, sdp: answer}));
     }
     else if (msg.type === 'answer') {
       console.log(`[Signaling <-] Answer ontvangen van ${msg.senderId}`);
+      const peer = peers.get(msg.senderId);
+      if (peer) {
+        await peer.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        console.log(`[WebRTC] Remote description ingesteld voor ${msg.senderId}`);
+      } else {
+        console.warn(`[WebRTC] Geen peer gevonden voor answer van ${msg.senderId}`);
+      }
     }
     else if (msg.type === 'ice-candidate') {
       console.log(`[ICE <-] Candidate ontvangen van ${msg.senderId}`);
