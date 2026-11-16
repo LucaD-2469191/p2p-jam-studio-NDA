@@ -249,6 +249,35 @@ document.getElementById('joinBtn').onclick = () => {
   ws.onclose = () => {
     console.warn('[WS] Verbinding met signaling server verbroken.');
   };
+
+  ws.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+    console.log(`[WS <-] Bericht ontvangen (${msg.type})`, msg);
+
+    if(msg.type === 'existing-users') {
+      console.log(`[Signaling] Bestaande gebruikers: ${msg.users.length}`, msg.users);
+      for (const targetId of msg.users) {
+        console.log(`[WebRTC ->] Start verbinding met ${targetId}`);
+        const pc = createPeerConnection(targetId, true);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log(`[Signaling ->] Offer versturen naar ${targetId}`);
+        ws.send(JSON.stringify({ type: 'offer', targetId, sdp: offer}));
+      }
+    }
+    else if (msg.type === 'offer') {
+      console.log(`[Signaling <-] Offer ontvangen van ${msg.senderId}. Answer aanmaken...`);
+    }
+    else if (msg.type === 'answer') {
+      console.log(`[Signaling <-] Answer ontvangen van ${msg.senderId}`);
+    }
+    else if (msg.type === 'ice-candidate') {
+      console.log(`[ICE <-] Candidate ontvangen van ${msg.senderId}`);
+    }
+    else if (msg.type === 'user-left') {
+      console.log(`[Signaling] Gebruiker ${msg.userId} heeft de room verlaten.`);
+    }
+  };
   // TODO: Open WebSocket verbinding, stuur join-bericht ({ type: 'join', room, userId }),
   // enable de UI knoppen en verwerk signaling berichten ('existing-users', 'offer', 'answer', 'ice-candidate', 'user-left').
 };
