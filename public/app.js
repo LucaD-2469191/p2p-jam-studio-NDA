@@ -1,4 +1,4 @@
-const userId = 'user-' + Math.random().toString(36).substring(2, 7);
+let userId = null;
 let ws = null;
 const peers = new Map();
 
@@ -216,8 +216,39 @@ const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 document.getElementById('joinBtn').onclick = () => {
   if (audioCtx.state === 'suspended') audioCtx.resume();
   const room = document.getElementById('roomInput').value.trim();
-  if (!room) return;
+  if (!room) {
+    console.warn('[Join] Geen room naam ingevuld');
+    return;
+  }
+  userId = document.getElementById('userInput').value.trim();
+  if (!userId) {
+    userId = 'user-' + Math.random().toString(36).substring(2, 7)
+    console.log(`[Join] Geen gebruikersnaam ingegeven, is nu ${userId}`)
+  }
 
+  document.getElementById('roomInput').disabled = true;
+  document.getElementById('userInput').disabled = true;
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}`;
+  console.log(`[WS] Verbinden met signaling server op ${wsUrl}...`)
+  ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    console.log(`[WS] Verbonden! Join bericht sturen voor room "${room}" als ${userId}`)
+    ws.send(JSON.stringify({ type: 'join', room, userId}));
+    document.getElementById('statusText').textContent = `Verbonden als ${userId} in kamer "${room}"`;
+    document.getElementById('joinBtn').disabled = true;
+    ['playBtn', 'bpmInput', 'syncClockBtn', 'clearAllBtn', 'swingSlider', 'filterSlider'].forEach(id => {
+      document.getElementById(id).disabled = false;
+    });
+  };
+  ws.onerror = (err) => {
+    console.error('[WS] WebSocket fout opgetreden')
+  };
+  ws.onclose = () => {
+    console.warn('[WS] Verbinding met signaling server verbroken.');
+  };
   // TODO: Open WebSocket verbinding, stuur join-bericht ({ type: 'join', room, userId }),
   // enable de UI knoppen en verwerk signaling berichten ('existing-users', 'offer', 'answer', 'ice-candidate', 'user-left').
 };

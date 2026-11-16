@@ -12,27 +12,28 @@
 
     <div class="panel row">
       <input type="text" id="roomInput" value="studio-1" placeholder="Room naam">
+      <input type="text" id="userInput" value="" placeholder="Gebruikersnaam">
       <button id="joinBtn" class="primary">Join Jam Session</button>
       <span id="statusText" class="muted-text">Niet verbonden</span>
     </div>
 
     <div class="panel row row-between">
       <div class="row">
-        <button id="playBtn" enabled>▶ Start</button>
+        <button id="playBtn" disabled>▶ Start</button>
         <label class="bpm-label">
-          BPM: <input type="number" id="bpmInput" class="bpm-input" value="120" min="60" max="200" enabled>
+          BPM: <input type="number" id="bpmInput" class="bpm-input" value="120" min="60" max="200" disabled>
         </label>
-        <button id="syncClockBtn" enabled>Sync Klok</button>
-        <button id="clearAllBtn" enabled>Clear All</button>
+        <button id="syncClockBtn" disabled>Sync Klok</button>
+        <button id="clearAllBtn" disabled>Clear All</button>
       </div>
       <div class="row">
         <div class="slider-group">
           <label>Swing: <span id="swingVal">0%</span></label>
-          <input type="range" id="swingSlider" min="0" max="40" value="0" enabled>
+          <input type="range" id="swingSlider" min="0" max="40" value="0" disabled>
         </div>
         <div class="slider-group">
           <label>Master Filter: <span id="filterVal">20000 Hz</span></label>
-          <input type="range" id="filterSlider" min="150" max="20000" value="20000" enabled>
+          <input type="range" id="filterSlider" min="150" max="20000" value="20000" disabled>
         </div>
       </div>
     </div>
