@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Collaborative Jam Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>P2P Collaborative Jam Studio</h1>
+
+    <div class="panel row">
+      <input type="text" id="roomInput" value="studio-1" placeholder="Room naam">
+      <button id="joinBtn" class="primary">Join Jam Session</button>
+      <span id="statusText" class="muted-text">Niet verbonden</span>
+    </div>
+
+    <div class="panel row row-between">
+      <div class="row">
+        <button id="playBtn" enabled>▶ Start</button>
+        <label class="bpm-label">
+          BPM: <input type="number" id="bpmInput" class="bpm-input" value="120" min="60" max="200" enabled>
+        </label>
+        <button id="syncClockBtn" enabled>Sync Klok</button>
+        <button id="clearAllBtn" enabled>Clear All</button>
+      </div>
+      <div class="row">
+        <div class="slider-group">
+          <label>Swing: <span id="swingVal">0%</span></label>
+          <input type="range" id="swingSlider" min="0" max="40" value="0" enabled>
+        </div>
+        <div class="slider-group">
+          <label>Master Filter: <span id="filterVal">20000 Hz</span></label>
+          <input type="range" id="filterSlider" min="150" max="20000" value="20000" enabled>
+        </div>
+      </div>
+    </div>
+    <div id="clockOffsetText" class="clock-offset">Offset: 0 ms</div>
+
+    <div class="panel">
+      <div class="row row-between sequencer-header">
+        <h3>Gedeelde 16-Staps Sequencer</h3>
+        <select id="waveformSelect">
+          <option value="supersaw">Preset: Supersaw (Breed & Vol)</option>
+          <option value="acid303">Preset: Acid 303 (Resonant Filter)</option>
+          <option value="fmbell">Preset: FM Bell / Pluck</option>
+          <option value="reese">Preset: Heavy Reese Bass</option>
+          <option value="sawtooth">Basic: Sawtooth</option>
+          <option value="square">Basic: Square</option>
+          <option value="triangle">Basic: Triangle</option>
+        </select>
+      </div>
+      <div id="sequencerGrid"></div>
+
+      <h4 class="solo-title">Live Solo Synth (WebRTC Audio Stream)</h4>
+      <div class="keys" id="synthKeys"></div>
+    </div>
+
+    <div class="panel">
+      <h3>WebRTC Mesh Diagnostics (n > 2 Evaluatie)</h3>
+      <p class="diagnostics-subtitle">
+        Actieve P2P-verbindingen: <strong id="peerCount">0</strong> | Topologie: <strong>Full Mesh</strong>
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Peer ID</th>
+            <th>Reliable DC</th>
+            <th>Fast Slider DC</th>
+            <th>Audio Stream</th>
+            <th>RTT</th>
+          </tr>
+        </thead>
+        <tbody id="statsBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
