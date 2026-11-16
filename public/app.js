@@ -286,13 +286,20 @@ document.getElementById('joinBtn').onclick = () => {
     }
     else if (msg.type === 'ice-candidate') {
       console.log(`[ICE <-] Candidate ontvangen van ${msg.senderId}`);
+      const peer = peers.get(msg.senderId);
+      if (peer && msg.candidate) {
+        await peer.pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+      }
     }
     else if (msg.type === 'user-left') {
       console.log(`[Signaling] Gebruiker ${msg.userId} heeft de room verlaten.`);
+      if (peers.has(msg.userId)) {
+        peers.get(msg.userId).pc.close();
+        peers.delete(msg.userId);
+        console.log(`[WebRTC] PeerConnection gesloten en verwijderd voor ${msg.userId}`);
+      }
     }
   };
-  // TODO: Open WebSocket verbinding, stuur join-bericht ({ type: 'join', room, userId }),
-  // enable de UI knoppen en verwerk signaling berichten ('existing-users', 'offer', 'answer', 'ice-candidate', 'user-left').
 };
 
 function createPeerConnection(targetId, isInitiator) {
