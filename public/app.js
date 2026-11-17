@@ -304,7 +304,9 @@ document.getElementById('joinBtn').onclick = () => {
 
 function createPeerConnection(targetId, isInitiator) {
   const pc = new RTCPeerConnection(rtcConfig);
-  peers.set(targetId, { pc, reliableDc: null, fastDc: null, rtt: '-'});
+
+  const peer = {pc, reliableDc: null, fastDc: null, rtt: '-'}
+  peers.set(targetId, peer);
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -317,8 +319,29 @@ function createPeerConnection(targetId, isInitiator) {
   };
 
   if (isInitiator) {
-    pc.createDataChannel('test-channel');
+    //pc.createDataChannel('test-channel');
+    peer.reliableDc = pc.createDataChannel('reliable', {ordered: true});
+    peer.fastDc = pc.createDataChannel('fast', {ordered: false, maxRetransmits: 0});
+
+    setupDataChannel(peer.reliableDc, targetId);
+    setupDataChannel(peer.fastDc, targetId);
   }
+
+  pc.ondatachannel = (event) => {
+    const dc = event.channel;
+
+    if (dc.label === 'reliable') {
+      peer.reliableDc = dc;
+    } else if (dc.label === 'fast') {
+      peer.fastDc = dc;
+    } else {
+      console.warn(`Onbekend DataChannel: ${dc.label}`);
+      dc.close();
+      return;
+    }
+
+    setupDataChannel(dc, targetId);
+  };
 
   pc.onconnectionstatechange = () => {
     console.log(`[WebRTC] Status met ${targetId}: ${pc.connectionState}`);
@@ -340,6 +363,81 @@ function setupDataChannel(dc, peerId) {
   dc.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     console.log(`[DataChannel <-] Bericht van ${peerId} op '${dc.label}':`, msg);
+
+    switch (msg.type) {
+
+        case 'STEP_TOGGLE':
+            updateStepUI(msg.tIdx, msg.sIdx, msg.active);
+            break;
+
+        case 'NOTE_CHANGE':
+            tracks[msg.tIdx].notes[msg.sIdx] = msg.note;
+
+            const noteSelect = document.querySelector(
+                `.note-select[data-track="${msg.tIdx}"][data-step="${msg.sIdx}"]`
+            );
+
+            if (noteSelect) {
+                noteSelect.value = msg.note;
+            }
+            break;
+
+        case 'CLEAR_TRACK':
+            for (let s = 0; s < 16; s++) {
+                updateStepUI(msg.tIdx, s, false);
+            }
+            break;
+
+        case 'SET_TRACK':
+            for (let s = 0; s < 16; s++) {
+                updateStepUI(msg.tIdx, s, msg.steps[s]);
+            }
+            break;
+
+        case 'CLEAR_ALL':
+            for (let t = 0; t < tracks.length; t++) {
+                for (let s = 0; s < 16; s++) {
+                    updateStepUI(t, s, false);
+                }
+            }
+            break;
+
+        case 'BPM':
+            bpm = msg.bpm;
+            document.getElementById('bpmInput').value = bpm;
+            break;
+
+        case 'SWING':
+            swing = msg.swing;
+            document.getElementById('swingSlider').value = swing;
+            document.getElementById('swingVal').textContent = `${swing}%`;
+            break;
+
+        case 'FILTER':
+            masterFilter.frequency.setValueAtTime(
+                msg.freq,
+                audioCtx.currentTime
+            );
+
+            document.getElementById('filterSlider').value = msg.freq;
+            document.getElementById('filterVal').textContent = `${msg.freq} Hz`;
+            break;
+
+        case 'TRANSPORT':
+            if (msg.action === 'START') {
+                bpm = msg.bpm;
+                document.getElementById('bpmInput').value = bpm;
+                startSequencer(msg.step);
+            } else if (msg.action === 'STOP') {
+                stopSequencer();
+            }
+            break;
+
+        default:
+            console.warn('Onbekend berichttype:', msg.type);
+            break;
+    }
+
   };
   // TODO: Luister naar dc.onmessage om inkomende acties van peers te verwerken
   // (STEP_TOGGLE, NOTE_CHANGE, CLEAR_TRACK, SET_TRACK, CLEAR_ALL, SWING, FILTER, TRANSPORT, BPM, CLOCK_PING, CLOCK_PONG).
@@ -347,10 +445,35 @@ function setupDataChannel(dc, peerId) {
 
 function broadcastReliable(payloadObj) {
   // TODO: Verstuur payloadObj als JSON naar alle open reliable DataChannels in 'peers'.
+
+  const message = JSON.stringify(payloadObj)
+
+  for (const [peerID, peer] of peers) {
+    const dc = peer.reliableDc;
+
+    if (dc && dc.readyState === 'open'){
+      dc.send(message);
+
+      console.log(`reiable bericht verzonden naar ${peerID}:`,payloadObj);
+    }
+  }
 }
 
 function broadcastFast(payloadObj) {
   // TODO: Verstuur payloadObj als JSON naar alle open fast/unreliable DataChannels in 'peers'.
+
+  const message = JSON.stringify(payloadObj);
+
+    for (const [peerId, peer] of peers) {
+        const dc = peer.fastDc;
+
+        if (dc && dc.readyState === 'open') {
+            dc.send(message);
+
+            console.log(
+                `fast Bericht verstuurd naar ${peerId}:`,payloadObj);
+        }
+    }
 }
 
 const gridEl = document.getElementById('sequencerGrid');
