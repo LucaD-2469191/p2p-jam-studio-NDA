@@ -32,6 +32,10 @@ const START_LEAD_MS = 1500;
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const streamDestination = audioCtx.createMediaStreamDestination();
+const liveAudioDestination = audioCtx.createMediaStreamDestination();
+let localMicStream = null;
+let micEnabled = false;
+
 const masterFilter = audioCtx.createBiquadFilter();
 masterFilter.type = 'lowpass';
 masterFilter.frequency.value = 20000;
@@ -94,6 +98,7 @@ function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
 
         osc.connect(gain);
         gain.connect(masterFilter);
+        if (id === 'solo') gain.connect(liveAudioDestination);
         osc.start(now);
         osc.stop(now + decay);
       });
@@ -117,6 +122,7 @@ function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
       osc.connect(filter);
       filter.connect(gain);
       gain.connect(masterFilter);
+      if (id === 'solo') gain.connect(liveAudioDestination);
       osc.start(now);
       osc.stop(now + decay);
     } 
@@ -142,6 +148,7 @@ function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
       modGain.connect(carrier.frequency);
       carrier.connect(mainGain);
       mainGain.connect(masterFilter);
+      if (id === 'solo') mainGain.connect(liveAudioDestination);
 
       carrier.start(now);
       modulator.start(now);
@@ -167,6 +174,7 @@ function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
         osc.connect(filter);
         filter.connect(gain);
         gain.connect(masterFilter);
+        if (id === 'solo') gain.connect(liveAudioDestination);
         osc.start(now);
         osc.stop(now + 0.32);
       });
@@ -181,6 +189,7 @@ function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
       gain.gain.exponentialRampToValueAtTime(0.001, now + decay);
       osc.connect(gain);
       gain.connect(masterFilter);
+      if (id === 'solo') gain.connect(liveAudioDestination);
       osc.start(now);
       osc.stop(now + decay);
     }
@@ -394,8 +403,9 @@ document.getElementById('joinBtn').onclick = () => {
     ws.send(JSON.stringify({ type: 'join', room, userId}));
     document.getElementById('statusText').textContent = `Verbonden als ${userId} in kamer "${room}"`;
     document.getElementById('joinBtn').disabled = true;
-    ['playBtn', 'bpmInput', 'syncClockBtn', 'clearAllBtn', 'swingSlider', 'filterSlider'].forEach(id => {
-      document.getElementById(id).disabled = false;
+    ['playBtn', 'bpmInput', 'syncClockBtn', 'clearAllBtn', 'swingSlider', 'filterSlider', 'micBtn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = false;
     });
   };
   ws.onerror = (err) => {
@@ -462,6 +472,18 @@ function createPeerConnection(targetId, isInitiator) {
 
   const peer = {pc, reliableDc: null, fastDc: null, rtt: '-', clockOffset: 0, clockSynced: false, pendingPings: new Map()}
   peers.set(targetId, peer);
+
+  liveAudioDestination.stream.getTracks().forEach(track => {
+    pc.addTrack(track, liveAudioDestination.stream);
+  });
+
+  pc.ontrack = (event) => {
+    console.log(`[WebRTC Audio] Inkomende audio stream van ${targetId}`);
+    const remoteAudio = new Audio();
+    remoteAudio.srcObject = event.streams[0];
+    remoteAudio.autoplay = true;
+    remoteAudio.play().catch(e => console.warn('[Audio] Autoplay geblokkeerd:', e));
+  };
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -577,6 +599,19 @@ function setupDataChannel(dc, peerId) {
             document.getElementById('filterSlider').value = msg.freq;
             document.getElementById('filterVal').textContent = `${msg.freq} Hz`;
             break;
+
+        case 'SOLO_NOTE': {
+            const keyEl = document.querySelector(`.key[data-note="${msg.note}"]`);
+            if (keyEl) {
+                keyEl.style.background = 'var(--accent-alt)';
+                keyEl.style.color = '#fff';
+                setTimeout(() => {
+                    keyEl.style.background = '';
+                    keyEl.style.color = '';
+                }, 200);
+            }
+            break;
+        }
 
         // case 'TRANSPORT':
         //     if (msg.action === 'START') {
@@ -833,10 +868,42 @@ const keysEl = document.getElementById('synthKeys');
 ['C4', 'D4', 'E4', 'G4', 'A4', 'C5'].forEach(noteName => {
   const key = document.createElement('div');
   key.className = 'key';
+  key.dataset.note = noteName;
   key.textContent = noteName;
-  key.onmousedown = () => triggerSound(null, 0, noteFrequencies[noteName]);
+  key.onmousedown = () => {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    triggerSound(null, 0, noteFrequencies[noteName]);
+    broadcastFast({ type: 'SOLO_NOTE', note: noteName });
+  };
   keysEl.appendChild(key);
 });
+
+const micBtn = document.getElementById('micBtn');
+if (micBtn) {
+  micBtn.onclick = async () => {
+    if (!micEnabled) {
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        localMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const micSource = audioCtx.createMediaStreamSource(localMicStream);
+        micSource.connect(liveAudioDestination);
+        micEnabled = true;
+        micBtn.textContent = 'Mic: Aan';
+        micBtn.classList.add('primary');
+      } catch (err) {
+        console.error('[Voice] Microfoon toegang geweigerd:', err);
+      }
+    } else {
+      if (localMicStream) {
+        localMicStream.getTracks().forEach(t => t.stop());
+        localMicStream = null;
+      }
+      micEnabled = false;
+      micBtn.textContent = 'Mic: Uit';
+      micBtn.classList.remove('primary');
+    }
+  };
+}
 
 // document.getElementById('playBtn').onclick = () => {
 //   if (!isPlaying) {
