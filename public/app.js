@@ -22,6 +22,13 @@ let bpm = 120;
 let swing = 0;
 let currentStep = 0;
 let stepTimeoutId = null;
+let nextAbsoluteStep = 0;
+let playbackStartAudioTime = 0;
+let playbackGeneration = 0;
+
+const SCHEDULER_POLL_MS = 25;
+const SCHEDULER_AHEAD_SECONDS = 0.15;
+const START_LEAD_MS = 1500;
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const streamDestination = audioCtx.createMediaStreamDestination();
@@ -32,11 +39,11 @@ masterFilter.Q.value = 2.5;
 masterFilter.connect(audioCtx.destination);
 masterFilter.connect(streamDestination);
 
-function triggerSound(track, stepIndex = 0, customFreq = null) {
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+function triggerSound(track, stepIndex = 0, customFreq = null, when = null) {
+  //if (audioCtx.state === 'suspended') audioCtx.resume();
   if (track && track.muted) return;
 
-  const now = audioCtx.currentTime;
+  const now = when ?? audioCtx.currentTime;
   const vol = track ? track.volume : 0.6;
   const id = track ? track.id : 'solo';
 
@@ -180,35 +187,183 @@ function triggerSound(track, stepIndex = 0, customFreq = null) {
   }
 }
 
+// function scheduleNextStep() {
+//   if (!isPlaying) return;
+//   document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
+
+//   tracks.forEach((track, tIdx) => {
+//     const stepEl = document.querySelector(`.step[data-track="${tIdx}"][data-step="${currentStep}"]`);
+//     if (stepEl) stepEl.classList.add('playing');
+//     if (track.steps[currentStep]) triggerSound(track, currentStep);
+//   });
+
+//   const baseStepMs = (60 / bpm / 4) * 1000;
+//   const swingOffset = (currentStep % 2 === 0) ? baseStepMs * (swing / 100) : -baseStepMs * (swing / 100);
+//   currentStep = (currentStep + 1) % 16;
+//   stepTimeoutId = setTimeout(scheduleNextStep, Math.max(30, baseStepMs + swingOffset));
+// }
+
+function stepOffsetSeconds(absoluteStep) {
+    const stepSeconds = 60 / bpm / 4;
+    const swingRatio = swing / 100;
+
+    const pairs = Math.floor(absoluteStep / 2);
+
+    const oddExtra = (absoluteStep % 2)
+        * stepSeconds
+        * (1 + swingRatio);
+
+    return pairs * 2 * stepSeconds + oddExtra;
+}
+
+
+
 function scheduleNextStep() {
-  if (!isPlaying) return;
-  document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
+    if (!isPlaying || audioCtx.state !== 'running') {
+        return;
+    }
 
-  tracks.forEach((track, tIdx) => {
-    const stepEl = document.querySelector(`.step[data-track="${tIdx}"][data-step="${currentStep}"]`);
-    if (stepEl) stepEl.classList.add('playing');
-    if (track.steps[currentStep]) triggerSound(track, currentStep);
-  });
+    const now = audioCtx.currentTime;
+    const horizon = now + SCHEDULER_AHEAD_SECONDS;
 
-  const baseStepMs = (60 / bpm / 4) * 1000;
-  const swingOffset = (currentStep % 2 === 0) ? baseStepMs * (swing / 100) : -baseStepMs * (swing / 100);
-  currentStep = (currentStep + 1) % 16;
-  stepTimeoutId = setTimeout(scheduleNextStep, Math.max(30, baseStepMs + swingOffset));
+    while (
+        isPlaying &&
+        playbackStartAudioTime + stepOffsetSeconds(nextAbsoluteStep) < horizon
+    ) {
+        const absoluteStep = nextAbsoluteStep;
+        const step = absoluteStep % 16;
+
+        const when = playbackStartAudioTime
+            + stepOffsetSeconds(absoluteStep);
+
+        nextAbsoluteStep++;
+
+        // Een gemiste stap niet achteraf afspelen
+        if (when < now - 0.015) {
+            continue;
+        }
+
+        // Alle actieve instrumenten op deze stap plannen
+        for (let t = 0; t < tracks.length; t++) {
+            const track = tracks[t];
+
+            if (track.steps[step]) {
+                triggerSound(
+                    track,
+                    step,
+                    null,
+                    Math.max(now, when)
+                );
+            }
+        }
+
+        // Visuele stapindicator bijwerken
+        const generation = playbackGeneration;
+
+        const delayMs = Math.max(
+            0,
+            (when - audioCtx.currentTime) * 1000
+        );
+
+        setTimeout(() => {
+            if (!isPlaying || generation !== playbackGeneration) {
+                return;
+            }
+
+            currentStep = step;
+
+            const previous = document.querySelectorAll('.step.playing');
+
+            for (const el of previous) {
+                el.classList.remove('playing');
+            }
+
+            for (let t = 0; t < tracks.length; t++) {
+                const el = document.querySelector(
+                    `.step[data-track="${t}"][data-step="${step}"]`
+                );
+
+                if (el) {
+                    el.classList.add('playing');
+                }
+            }
+        }, delayMs);
+    }
 }
 
-function startSequencer(startStep = 0) {
-  stopSequencer();
-  isPlaying = true;
-  currentStep = startStep;
-  document.getElementById('playBtn').textContent = '⏹ Stop';
-  scheduleNextStep();
+
+
+// function startSequencer(startStep = 0) {
+//   stopSequencer();
+//   isPlaying = true;
+//   currentStep = startStep;
+//   document.getElementById('playBtn').textContent = '⏹ Stop';
+//   scheduleNextStep();
+// }
+
+// function stopSequencer() {
+//   isPlaying = false;
+//   clearTimeout(stepTimeoutId);
+//   document.getElementById('playBtn').textContent = '▶ Start';
+//   document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
+// }
+
+
+async function startSequencer(startStep = 0, startAtMs = Date.now()) {
+    stopSequencer();
+
+    const generation = playbackGeneration;
+
+    await audioCtx.resume();
+
+    // Voorkom dat een oudere start na een stop toch doorgaat
+    if (generation !== playbackGeneration) {
+        return;
+    }
+
+    isPlaying = true;
+    currentStep = startStep;
+    nextAbsoluteStep = 0;
+
+    const waitSeconds = Math.max(
+        0,
+        (startAtMs - Date.now()) / 1000
+    );
+
+    playbackStartAudioTime =
+        audioCtx.currentTime
+        + waitSeconds
+        - stepOffsetSeconds(startStep);
+
+    document.getElementById('playBtn').textContent = '⏹ Stop';
+
+    stepTimeoutId = setInterval(
+        scheduleNextStep,
+        SCHEDULER_POLL_MS
+    );
+
+    scheduleNextStep();
 }
+
 
 function stopSequencer() {
-  isPlaying = false;
-  clearTimeout(stepTimeoutId);
-  document.getElementById('playBtn').textContent = '▶ Start';
-  document.querySelectorAll('.step.playing').forEach(el => el.classList.remove('playing'));
+    isPlaying = false;
+
+    playbackGeneration++;
+
+    if (stepTimeoutId !== null) {
+        clearInterval(stepTimeoutId);
+    }
+
+    stepTimeoutId = null;
+
+    document.getElementById('playBtn').textContent = '▶ Start';
+
+    const playing = document.querySelectorAll('.step.playing');
+
+    for (const el of playing) {
+        el.classList.remove('playing');
+    }
 }
 
 const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -305,7 +460,7 @@ document.getElementById('joinBtn').onclick = () => {
 function createPeerConnection(targetId, isInitiator) {
   const pc = new RTCPeerConnection(rtcConfig);
 
-  const peer = {pc, reliableDc: null, fastDc: null, rtt: '-'}
+  const peer = {pc, reliableDc: null, fastDc: null, rtt: '-', clockOffset: 0, clockSynced: false, pendingPings: new Map()}
   peers.set(targetId, peer);
 
   pc.onicecandidate = (event) => {
@@ -423,16 +578,106 @@ function setupDataChannel(dc, peerId) {
             document.getElementById('filterVal').textContent = `${msg.freq} Hz`;
             break;
 
-        case 'TRANSPORT':
+        // case 'TRANSPORT':
+        //     if (msg.action === 'START') {
+        //         bpm = msg.bpm;
+        //         document.getElementById('bpmInput').value = bpm;
+        //         startSequencer(msg.step);
+        //     } else if (msg.action === 'STOP') {
+        //         stopSequencer();
+        //     }
+        //     break;
+
+        
+        
+        case 'TRANSPORT': {
+            if (dc.label !== 'reliable') {
+                break;
+            }
+
             if (msg.action === 'START') {
+                const peer = peers.get(peerId);
+
+                let offset = 0;
+
+                if (peer && peer.clockSynced) {
+                    offset = peer.clockOffset;
+                } else {
+                    console.warn(
+                        `Geen klokoffset voor ${peerId}, start zonder correctie`
+                    );
+                }
+
                 bpm = msg.bpm;
                 document.getElementById('bpmInput').value = bpm;
-                startSequencer(msg.step);
+
+                const localStartTime = msg.startTime - offset;
+
+                console.log(
+                    `[Transport] START van ${peerId}, start over ${
+                        localStartTime - Date.now()
+                    } ms`
+                );
+
+                startSequencer(msg.step, localStartTime);
+
             } else if (msg.action === 'STOP') {
+                console.log(`[Transport] STOP van ${peerId}`);
                 stopSequencer();
             }
-            break;
 
+            break;
+        }
+
+
+          
+        case 'CLOCK_PING': {
+            const t2 = Date.now();
+
+            if (dc.label !== 'reliable') {
+                break;
+            }
+
+            const t3 = Date.now();
+
+            dc.send(JSON.stringify({
+                type: 'CLOCK_PONG',
+                pingId: msg.pingId,
+                t1: msg.t1,
+                t2,
+                t3
+            }));
+            break;
+        }
+        
+        case 'CLOCK_PONG': {
+            const t4 = Date.now();
+            const peer = peers.get(peerId);
+
+            if (!peer || dc.label !== 'reliable') {
+                break;
+            }
+
+            const t1 = peer.pendingPings.get(msg.pingId);
+
+            if (t1 === undefined) {
+                break;
+            }
+
+            peer.pendingPings.delete(msg.pingId);
+
+            const t2 = msg.t2;
+            const t3 = msg.t3;
+
+            const rtt = (t4 - t1) - (t3 - t2);
+            const offset = ((t2 - t1) + (t3 - t4)) / 2;
+
+            peer.rtt = rtt.toFixed(1) + ' ms';
+            peer.clockOffset = offset;
+            peer.clockSynced = true;
+            break;
+        }
+          
         default:
             console.warn('Onbekend berichttype:', msg.type);
             break;
@@ -475,6 +720,31 @@ function broadcastFast(payloadObj) {
         }
     }
 }
+
+
+function syncClock() {
+    for (const [peerId, peer] of peers) {
+        const dc = peer.reliableDc;
+
+        if (!dc || dc.readyState !== 'open') {
+            continue;
+        }
+
+        const pingId = crypto.randomUUID();
+        const t1 = Date.now();
+
+        peer.pendingPings.set(pingId, t1);
+
+        dc.send(JSON.stringify({
+            type: 'CLOCK_PING',
+            pingId,
+            t1
+        }));
+
+        console.log(`[Clock ->] Ping naar ${peerId}`);
+    }
+}
+
 
 const gridEl = document.getElementById('sequencerGrid');
 tracks.forEach((track, tIdx) => {
@@ -568,15 +838,41 @@ const keysEl = document.getElementById('synthKeys');
   keysEl.appendChild(key);
 });
 
+// document.getElementById('playBtn').onclick = () => {
+//   if (!isPlaying) {
+//     startSequencer(0);
+//     broadcastReliable({ type: 'TRANSPORT', action: 'START', step: 0, bpm });
+//   } else {
+//     stopSequencer();
+//     broadcastReliable({ type: 'TRANSPORT', action: 'STOP' });
+//   }
+// };
+
+
 document.getElementById('playBtn').onclick = () => {
-  if (!isPlaying) {
-    startSequencer(0);
-    broadcastReliable({ type: 'TRANSPORT', action: 'START', step: 0, bpm });
-  } else {
-    stopSequencer();
-    broadcastReliable({ type: 'TRANSPORT', action: 'STOP' });
-  }
+    if (!isPlaying) {
+        const startTime = Date.now() + START_LEAD_MS;
+
+        startSequencer(0, startTime);
+
+        broadcastReliable({
+            type: 'TRANSPORT',
+            action: 'START',
+            step: 0,
+            bpm,
+            startTime
+        });
+
+    } else {
+        stopSequencer();
+
+        broadcastReliable({
+            type: 'TRANSPORT',
+            action: 'STOP'
+        });
+    }
 };
+
 
 document.getElementById('bpmInput').onchange = (e) => {
   bpm = parseInt(e.target.value, 10) || 120;
@@ -589,7 +885,8 @@ document.getElementById('clearAllBtn').onclick = () => {
 };
 
 document.getElementById('syncClockBtn').onclick = () => {
-  broadcastReliable({ type: 'CLOCK_PING', sentAt: performance.now(), currentStep, bpm, isPlaying });
+  //broadcastReliable({ type: 'CLOCK_PING', sentAt: performance.now(), currentStep, bpm, isPlaying });
+  syncClock();
 };
 
 document.getElementById('swingSlider').oninput = (e) => {
